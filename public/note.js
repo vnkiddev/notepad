@@ -2,7 +2,7 @@ const content = document.getElementById('content');
 const save = document.getElementById('save');
 const raw = document.getElementById('raw');
 
-const slug = window.location.pathname.split('/')[2];
+const slug = window.location.pathname.split('/')[1];
 
 // Load note
 (async () => {

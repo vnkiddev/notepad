@@ -66,7 +66,7 @@ app.post('/api/paste', (req, res) => {
   
   try {
     const existing = db.exec('SELECT slug FROM notes WHERE slug = ?', [slug]);
-    if (existing[0]?.values.length > 0) {
+    if (existing[0] && existing[0].values.length > 0) {
       return res.status(409).json({ error: 'Slug already exists' });
     }
     
@@ -76,7 +76,7 @@ app.post('/api/paste', (req, res) => {
     
     res.json({
       slug,
-      url: `/p/${slug}`,
+      url: `/${slug}`,
       raw: `/raw/${slug}`
     });
   } catch (err) {
@@ -126,12 +126,13 @@ app.get('/raw/:slug', (req, res) => {
   res.type('text/plain').send(result[0].values[0][0]);
 });
 
-// Serve pages
+// Home page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.get('/p/:slug', (req, res) => {
+// Note page - must be last to avoid conflicts with /api and /raw
+app.get('/:slug', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'note.html'));
 });
 
