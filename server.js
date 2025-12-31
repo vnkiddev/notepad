@@ -1,39 +1,24 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const initSqlJs = require('sql.js');
 
 const app = express();
-const DB_FILE = 'notes.db';
-let db;
+const DB_FILE = 'notes.json';
 
-// Init DB
-(async () => {
-  const SQL = await initSqlJs();
-  
+// Load or initialize database
+function loadDb() {
   if (fs.existsSync(DB_FILE)) {
-    const buffer = fs.readFileSync(DB_FILE);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
+    const data = fs.readFileSync(DB_FILE, 'utf8');
+    return JSON.parse(data);
   }
-  
-  db.run(`
-    CREATE TABLE IF NOT EXISTS notes (
-      slug TEXT PRIMARY KEY,
-      content TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    )
-  `);
-  
-  saveDb();
-})();
-
-function saveDb() {
-  const data = db.export();
-  fs.writeFileSync(DB_FILE, data);
+  return {};
 }
+
+function saveDb(db) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+}
+
+let db = loadDb();
 
 app.use(express.json({ limit: '200kb' }));
 app.use(express.static('public'));
@@ -62,38 +47,38 @@ app.post('/api/paste', (req, res) => {
     return res.status(400).json({ error: 'Invalid slug format' });
   }
   
-  const now = Date.now();
-  
-  try {
-    const existing = db.exec('SELECT slug FROM notes WHERE slug = ?', [slug]);
-    if (existing[0] && existing[0].values.length > 0) {
-      return res.status(409).json({ error: 'Slug already exists' });
-    }
-    
-    db.run('INSERT INTO notes (slug, content, created_at, updated_at) VALUES (?, ?, ?, ?)',
-      [slug, content, now, now]);
-    saveDb();
-    
-    res.json({
-      slug,
-      url: `/${slug}`,
-      raw: `/raw/${slug}`
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'Server error' });
+  if (db[slug]) {
+    return res.status(409).json({ error: 'Slug already exists' });
   }
+  
+  const now = Date.now();
+  db[slug] = {
+    content: content,
+    created_at: now,
+    updated_at: now
+  };
+  
+  saveDb(db);
+  
+  res.json({
+    slug: slug,
+    url: '/' + slug,
+    raw: '/raw/' + slug
+  });
 });
 
 // GET /api/paste/:slug - Get note
 app.get('/api/paste/:slug', (req, res) => {
-  const result = db.exec('SELECT slug, content FROM notes WHERE slug = ?', [req.params.slug]);
+  const note = db[req.params.slug];
   
-  if (!result[0] || result[0].values.length === 0) {
+  if (!note) {
     return res.status(404).json({ error: 'Not found' });
   }
   
-  const [slug, content] = result[0].values[0];
-  res.json({ slug, content });
+  res.json({ 
+    slug: req.params.slug, 
+    content: note.content 
+  });
 });
 
 // PUT /api/paste/:slug - Update note
@@ -104,39 +89,42 @@ app.put('/api/paste/:slug', (req, res) => {
     return res.status(400).json({ error: 'Content required' });
   }
   
-  try {
-    db.run('UPDATE notes SET content = ?, updated_at = ? WHERE slug = ?',
-      [content, Date.now(), req.params.slug]);
-    saveDb();
-    
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Server error' });
+  const note = db[req.params.slug];
+  
+  if (!note) {
+    return res.status(404).json({ error: 'Not found' });
   }
+  
+  note.content = content;
+  note.updated_at = Date.now();
+  
+  saveDb(db);
+  
+  res.json({ success: true });
 });
 
 // GET /raw/:slug - Plain text
 app.get('/raw/:slug', (req, res) => {
-  const result = db.exec('SELECT content FROM notes WHERE slug = ?', [req.params.slug]);
+  const note = db[req.params.slug];
   
-  if (!result[0] || result[0].values.length === 0) {
+  if (!note) {
     return res.status(404).send('Not found');
   }
   
-  res.type('text/plain').send(result[0].values[0][0]);
+  res.type('text/plain').send(note.content);
 });
 
 // Home page
-app.get('/', (req, res) => {
+app.get('/', function(req, res) {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Note page - must be last to avoid conflicts with /api and /raw
-app.get('/:slug', (req, res) => {
+app.get('/:slug', function(req, res) {
   res.sendFile(path.join(__dirname, 'public', 'note.html'));
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on http://0.0.0.0:${PORT}`);
+app.listen(PORT, '0.0.0.0', function() {
+  console.log('Server running on http://0.0.0.0:' + PORT);
 });
